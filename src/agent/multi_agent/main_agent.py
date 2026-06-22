@@ -1,0 +1,63 @@
+import yaml
+import asyncio
+from deepagents import create_deep_agent
+from pathlib import Path
+from agent.multi_agent.mcp_tool_config import mcp_client
+from agent.my_tools import web_search
+from agent.my_llm import llm
+from deepagents.backends import FilesystemBackend
+
+EXAMPLE_DIR = Path(__file__).parent.parent.parent
+print(f"EXAMPLE_DIR: {EXAMPLE_DIR}")
+
+
+async def load_subagents(config_path: str):
+    """通过读取配置文件，加载子Agent
+    Args:
+        config_path (str): 子Agent的配置文件路径
+    """
+    chat_tools = await mcp_client.get_tools(server_name="fenxi")
+
+    available_tools = {
+        "fenxi": chat_tools,
+        "web_search": [web_search],
+    }
+
+    with open(config_path, "r", encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+
+    subagents = []
+    for name, spec in config.items():
+        subagent = {
+            "name": name,
+            "description": spec["description"],
+            "system_prompt": spec["system_prompt"],
+        }
+        if "model" in spec:
+            subagent["model"] = spec["model"]
+        if "tools" in spec:
+            tools = [available_tools[t] for t in spec["tools"]]  # 这一行是什么意思
+            subagent["tools"] = tools[0]
+
+        subagents.append(subagent)
+    return subagents
+
+
+
+
+
+
+async def create():
+    # 通过配置文件加载子agent （子agent下面有加载tool， 这次还没有 skill)
+    sub_agent = await load_subagents(EXAMPLE_DIR/'subagents.yaml')
+    return create_deep_agent(
+        model=llm,
+        memory=['/AGENT.md'],   # 由 MemoryMiddleware 加载，主agent的系统提示词，通过md文件来代替系统提示词？？
+        tools=[web_search],
+        backend=FilesystemBackend(root_dir=EXAMPLE_DIR, virtual_mode=True),  # 防止Agent直接访问文件系统
+        subagents=sub_agent,
+    )
+
+
+
+agent = asyncio.run(create())
