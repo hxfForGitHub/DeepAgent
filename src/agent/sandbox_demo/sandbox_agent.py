@@ -2,10 +2,14 @@ import yaml
 import asyncio
 from deepagents import create_deep_agent
 from pathlib import Path
+
+
 from agent.multi_agent.mcp_tool_config import mcp_client
 from agent.my_tools import web_search
 from agent.my_llm import llm
-from deepagents.backends import FilesystemBackend
+
+from agent.sandbox_demo.custom_opensandbox import OpenSandboxBackend
+from agent.sandbox_demo.opensandbox_opt import get_or_create_sandbox, sync_skills_to_sandbox, config
 
 EXAMPLE_DIR = Path(__file__).parent.parent.parent
 print(f"EXAMPLE_DIR: {EXAMPLE_DIR}")
@@ -43,21 +47,44 @@ async def load_subagents(config_path: str):
     return subagents
 
 
-
-
-
-
 async def create():
     # 通过配置文件加载子agent （子agent下面有加载tool， 这次还没有 skill)
     sub_agent = await load_subagents(EXAMPLE_DIR/'subagents.yaml')
+
+    # 创建OpenSandbox 沙箱
+    sandbox = get_or_create_sandbox(config)
+
+    # 创建OpendSandbox 后端
+    backend = OpenSandboxBackend(sandbox=sandbox)
+
+    # 本地技能目录
+    local_skills_path = str(EXAMPLE_DIR/'skills')
+
+    # 沙箱中的技能目录
+    sandbox_skills_path = "/workspace/skills"
+
+    # skill 同步到沙箱中
+    uploaded_count = sync_skills_to_sandbox(backend, local_skills_path, sandbox_skills_path)
+
+    with open(EXAMPLE_DIR/'AGENTS.md', "r", encoding='utf-8') as f:
+        content = f.read()
+
+    # 上传到沙箱
+    result = backend.upload_files([("/AGENTS.md", content.encode("utf-8"))])
+
+    if uploaded_count > 0:
+        print(f"✅ 成功上传了 {uploaded_count} 个新技能到沙箱")
+    else:
+        print("✅ 所有技能已存在于沙箱中，无需上传")
+
+
     return create_deep_agent(
         model=llm,
+        skills=[sandbox_skills_path],
         memory=['/AGENTS.md'],   # 由 MemoryMiddleware 加载，主agent的系统提示词，通过md文件来代替系统提示词？？
         tools=[web_search],
-        backend=FilesystemBackend(root_dir=EXAMPLE_DIR, virtual_mode=True),  # 防止Agent直接访问文件系统
+        backend=backend,
         subagents=sub_agent,
     )
-
-
 
 agent = asyncio.run(create())
